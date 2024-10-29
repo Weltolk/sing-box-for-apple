@@ -83,6 +83,7 @@ public struct DashboardView: View {
     }
 
     struct DashboardView1: View {
+        @Environment(\.openURL) var openURL
         @EnvironmentObject private var environments: ExtensionEnvironments
         @EnvironmentObject private var profile: ExtensionProfile
         @State private var alert: Alert?
@@ -100,6 +101,9 @@ public struct DashboardView: View {
                 if newValue == .disconnecting || newValue == .connected {
                     Task {
                         await checkServiceError()
+                        if newValue == .connected {
+                            await checkDeprecatedNotes()
+                        }
                     }
                 } else if newValue == .connecting {
                     notStarted = true
@@ -112,6 +116,44 @@ public struct DashboardView: View {
                         }
                     }
                 }
+            }
+        }
+
+        private nonisolated func checkDeprecatedNotes() async {
+            NSLog("check DR")
+            do {
+                let reports = try LibboxNewStandaloneCommandClient()!.getDeprecatedNotes()
+                if reports.hasNext() {
+                    NSLog("has next")
+                    await MainActor.run {
+                        loopShowDeprecateNotes(reports)
+                    }
+                } else {
+                    NSLog("no next")
+                }
+            } catch {
+                await MainActor.run {
+                    alert = Alert(error)
+                }
+            }
+        }
+
+        @MainActor
+        private func loopShowDeprecateNotes(_ reports: any LibboxDeprecatedNoteIteratorProtocol) {
+            if reports.hasNext() {
+                let report = reports.next()!
+                NSLog("show next")
+                alert = Alert(
+                    title: Text("Deprecated Warning"),
+                    message: Text(report.message()),
+                    primaryButton: .cancel(Text("Ok")) {
+                        loopShowDeprecateNotes(reports)
+                    },
+                    secondaryButton: .default(Text("Documentation")) {
+                        openURL(URL(string: report.migrationLink)!)
+                        loopShowDeprecateNotes(reports)
+                    }
+                )
             }
         }
 
